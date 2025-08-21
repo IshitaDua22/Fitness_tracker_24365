@@ -1,0 +1,197 @@
+import streamlit as st
+import pandas as pd
+from datetime import date
+from Backend import (
+    create_user, get_user_by_email, update_user_profile, 
+    log_workout, add_exercises, get_workout_history, 
+    add_friendship, get_friends, get_leaderboard_data
+)
+
+st.set_page_config(
+    page_title="Personal Fitness Tracker",
+    page_icon="🏋️‍♂️",
+    layout="wide"
+)
+
+# --- Session State for User Management ---
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+if 'user_id' not in st.session_state:
+    st.session_state.user_id = None
+if 'user_name' not in st.session_state:
+    st.session_state.user_name = None
+
+def login_form():
+    """Handles user login and signup."""
+    st.sidebar.subheader("Login / Sign Up")
+    email = st.sidebar.text_input("Email")
+    
+    if st.sidebar.button("Login"):
+        user = get_user_by_email(email)
+        if user:
+            st.session_state.logged_in = True
+            st.session_state.user_id = user[0]
+            st.session_state.user_name = user[1]
+            st.sidebar.success(f"Welcome back, {user[1]}!")
+            st.rerun()
+        else:
+            st.sidebar.error("User not found. Try signing up.")
+
+    if st.sidebar.button("Sign Up"):
+        name = st.sidebar.text_input("Full Name")
+        if name and email:
+            user_id = create_user(name, email)
+            if user_id:
+                st.session_state.logged_in = True
+                st.session_state.user_id = user_id
+                st.session_state.user_name = name
+                st.sidebar.success(f"Account created! Welcome, {name}!")
+                st.rerun()
+            else:
+                st.sidebar.error("Failed to create account. Email might be in use.")
+
+def logout():
+    st.session_state.logged_in = False
+    st.session_state.user_id = None
+    st.session_state.user_name = None
+    st.rerun()
+
+# --- Main App Logic ---
+if not st.session_state.logged_in:
+    st.title("Welcome to your Personal Fitness Tracker! 🏋️‍♂️")
+    st.markdown("### Ishita Dua - 24365")
+    st.info("Please log in or sign up on the sidebar to continue.")
+    login_form()
+else:
+    st.sidebar.success(f"Logged in as {st.session_state.user_name}")
+    st.sidebar.button("Logout", on_click=logout)
+    
+    # Navigation
+    page = st.sidebar.radio("Go to", ["Dashboard", "Log Workout", "Friends & Leaderboard", "Manage Profile"])
+    
+    if page == "Dashboard":
+        st.title("My Fitness Dashboard 📈")
+        st.markdown("### Ishita Dua - 24365")
+        st.write("An overview of your fitness journey and progress.")
+        
+        # Display user goal
+        user_data = get_user_by_email(st.session_state.user_name) # Fetch fresh user data
+        if user_data:
+            st.subheader(f"My Goal: {user_data[4] or 'No goal set.'}")
+        
+        # Display workout history
+        st.subheader("Recent Workouts")
+        history = get_workout_history(st.session_state.user_id)
+        if history:
+            for workout in history[:5]:
+                with st.expander(f"**Workout on {workout['date']}** - Duration: {workout['duration']} min"):
+                    for exercise in workout['exercises']:
+                        st.write(f"- **{exercise[0]}**: {exercise[1]} sets, {exercise[2]} reps, {exercise[3]} kg")
+        else:
+            st.info("No workout history found. Log a new workout to see it here.")
+            
+    elif page == "Log Workout":
+        st.title("Log a New Workout 💪")
+        st.markdown("### Ishita Dua - 24365")
+        
+        with st.form("workout_form"):
+            workout_date = st.date_input("Date", date.today())
+            duration = st.number_input("Duration (minutes)", min_value=1, step=1)
+            
+            st.subheader("Exercises")
+            
+            # Use session state to manage dynamic exercise forms
+            if 'exercise_count' not in st.session_state:
+                st.session_state.exercise_count = 0
+                
+            if st.button("Add Exercise"):
+                st.session_state.exercise_count += 1
+                st.experimental_rerun()
+            
+            exercises = []
+            for i in range(st.session_state.exercise_count):
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    ex_name = st.text_input(f"Exercise Name {i+1}", key=f"name_{i}")
+                with col2:
+                    sets = st.number_input(f"Sets {i+1}", min_value=1, step=1, key=f"sets_{i}")
+                with col3:
+                    reps = st.number_input(f"Reps {i+1}", min_value=1, step=1, key=f"reps_{i}")
+                with col4:
+                    weight = st.number_input(f"Weight (kg) {i+1}", min_value=0.0, step=0.5, key=f"weight_{i}")
+                
+                exercises.append({'name': ex_name, 'sets': sets, 'reps': reps, 'weight': weight})
+            
+            submitted = st.form_submit_button("Save Workout")
+            
+            if submitted:
+                if workout_date and duration:
+                    workout_id = log_workout(st.session_state.user_id, workout_date, duration)
+                    if workout_id:
+                        if add_exercises(workout_id, exercises):
+                            st.success("Workout logged successfully!")
+                            st.session_state.exercise_count = 0
+                            st.rerun()
+                        else:
+                            st.error("Failed to add exercises.")
+                    else:
+                        st.error("Failed to log workout.")
+                else:
+                    st.warning("Please fill in all fields.")
+
+    elif page == "Friends & Leaderboard":
+        st.title("Friends & Leaderboard 🏆")
+        st.markdown("### Ishita Dua - 24365")
+
+        st.subheader("Leaderboard: Weekly Workouts")
+        leaderboard_data = get_leaderboard_data(st.session_state.user_id)
+        if leaderboard_data:
+            df_leaderboard = pd.DataFrame(leaderboard_data, columns=["Name", "Workouts This Week"])
+            df_leaderboard.index = range(1, len(df_leaderboard) + 1)
+            st.dataframe(df_leaderboard, use_container_width=True)
+        else:
+            st.info("No leaderboard data. Add friends and log workouts!")
+            
+        st.subheader("My Friends")
+        friends = get_friends(st.session_state.user_id)
+        if friends:
+            df_friends = pd.DataFrame(friends, columns=["ID", "Name"])
+            st.dataframe(df_friends, use_container_width=True)
+        else:
+            st.info("You have no friends yet.")
+
+        st.subheader("Add a Friend")
+        with st.form("add_friend_form"):
+            friend_email = st.text_input("Friend's Email")
+            submitted = st.form_submit_button("Add Friend")
+            if submitted:
+                friend_user = get_user_by_email(friend_email)
+                if friend_user:
+                    if add_friendship(st.session_state.user_id, friend_user[0]):
+                        st.success(f"You are now friends with {friend_user[1]}!")
+                    else:
+                        st.error("Failed to add friend.")
+                else:
+                    st.error("User not found.")
+
+    elif page == "Manage Profile":
+        st.title("Manage Your Profile ⚙️")
+        st.markdown("### Ishita Dua - 24365")
+        user_profile = get_user_by_email(st.session_state.user_name)
+        if user_profile:
+            with st.form("profile_form"):
+                name = st.text_input("Name", value=user_profile[1])
+                email = st.text_input("Email", value=user_profile[2], disabled=True)
+                weight = st.number_input("Current Weight (kg)", value=user_profile[3] or 0.0, min_value=0.0)
+                goal = st.text_area("Your Fitness Goal", value=user_profile[4] or "")
+                
+                submitted = st.form_submit_button("Update Profile")
+                if submitted:
+                    if update_user_profile(st.session_state.user_id, name, email, weight, goal):
+                        st.session_state.user_name = name
+                        st.success("Profile updated successfully!")
+                        st.rerun()
+                    else:
+                        st.error("Failed to update profile.")
+        else:
+            st.error("User profile not found.")
