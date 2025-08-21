@@ -1,0 +1,33 @@
+-- Table for User Profiles
+CREATE TABLE users (
+    user_id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    weight DECIMAL(5, 2),
+    goal TEXT
+);
+
+-- Table for Friendships (Many-to-Many relationship)
+CREATE TABLE friendships (
+    friendship_id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(user_id),
+    friend_id INTEGER REFERENCES users(user_id)
+);
+
+-- Table for Workout Logs
+CREATE TABLE workouts (
+    workout_id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(user_id),
+    workout_date DATE NOT NULL,
+    duration_minutes INTEGER
+);
+
+-- Table for Exercise Details (One-to-Many relationship with workouts)
+CREATE TABLE exercises (
+    exercise_id SERIAL PRIMARY KEY,
+    workout_id INTEGER REFERENCES workouts(workout_id),
+    exercise_name VARCHAR(255) NOT NULL,
+    sets INTEGER,
+    reps INTEGER,
+    weight_lifted DECIMAL(10, 2)
+);
