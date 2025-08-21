@@ -1,0 +1,234 @@
+import psycopg2
+import os
+from dotenv import load_dotenv
+from datetime import date, timedelta
+
+# Load environment variables
+load_dotenv()
+DB_NAME = os.getenv('24365')
+DB_USER = os.getenv('postgres')
+DB_PASS = os.getenv('Iamstrong22082000!')
+DB_HOST = os.getenv('localhost')
+
+def get_db_connection():
+    """Establishes a connection to the PostgreSQL database."""
+    try:
+        conn = psycopg2.connect(
+            dbname=DB_NAME,
+            user=DB_USER,
+            password=DB_PASS,
+            host=DB_HOST
+        )
+        return conn
+    except psycopg2.Error as e:
+        print(f"Error connecting to the database: {e}")
+        return None
+
+# --- User Profile Management ---
+def create_user(name, email, weight=None, goal=None):
+    """Creates a new user profile."""
+    conn = get_db_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO users (name, email, weight, goal) VALUES (%s, %s, %s, %s) RETURNING user_id",
+                    (name, email, weight, goal)
+                )
+                user_id = cur.fetchone()[0]
+                conn.commit()
+                return user_id
+        except psycopg2.IntegrityError as e:
+            print(f"User with email '{email}' already exists.")
+            conn.rollback()
+        except psycopg2.Error as e:
+            print(f"Error creating user: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+    return None
+
+def get_user_by_email(email):
+    """Fetches a user's profile by email."""
+    conn = get_db_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT user_id, name, email, weight, goal FROM users WHERE email = %s", (email,))
+                return cur.fetchone()
+        except psycopg2.Error as e:
+            print(f"Error fetching user: {e}")
+            return None
+        finally:
+            conn.close()
+    return None
+
+def update_user_profile(user_id, name, email, weight, goal):
+    """Updates a user's profile information."""
+    conn = get_db_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE users SET name = %s, email = %s, weight = %s, goal = %s WHERE user_id = %s",
+                    (name, email, weight, goal, user_id)
+                )
+                conn.commit()
+                return True
+        except psycopg2.Error as e:
+            print(f"Error updating user profile: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+    return False
+
+# --- Workout & Progress Tracking ---
+def log_workout(user_id, workout_date, duration):
+    """Logs a new workout and returns the workout_id."""
+    conn = get_db_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO workouts (user_id, workout_date, duration_minutes) VALUES (%s, %s, %s) RETURNING workout_id",
+                    (user_id, workout_date, duration)
+                )
+                workout_id = cur.fetchone()[0]
+                conn.commit()
+                return workout_id
+        except psycopg2.Error as e:
+            print(f"Error logging workout: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+    return None
+
+def add_exercises(workout_id, exercises):
+    """Adds multiple exercises to a logged workout."""
+    conn = get_db_connection()
+    if conn and exercises:
+        try:
+            with conn.cursor() as cur:
+                for ex in exercises:
+                    cur.execute(
+                        "INSERT INTO exercises (workout_id, exercise_name, sets, reps, weight_lifted) VALUES (%s, %s, %s, %s, %s)",
+                        (workout_id, ex['name'], ex['sets'], ex['reps'], ex['weight'])
+                    )
+                conn.commit()
+                return True
+        except psycopg2.Error as e:
+            print(f"Error adding exercises: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+    return False
+
+def get_workout_history(user_id):
+    """Fetches a user's workout history."""
+    conn = get_db_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT workout_id, workout_date, duration_minutes FROM workouts WHERE user_id = %s ORDER BY workout_date DESC",
+                    (user_id,)
+                )
+                workouts = cur.fetchall()
+                history = []
+                for workout in workouts:
+                    cur.execute(
+                        "SELECT exercise_name, sets, reps, weight_lifted FROM exercises WHERE workout_id = %s",
+                        (workout[0],)
+                    )
+                    exercises = cur.fetchall()
+                    history.append({
+                        'workout_id': workout[0],
+                        'date': workout[1],
+                        'duration': workout[2],
+                        'exercises': exercises
+                    })
+                return history
+        except psycopg2.Error as e:
+            print(f"Error fetching workout history: {e}")
+            return []
+        finally:
+            conn.close()
+    return []
+
+# --- Social & Leaderboard ---
+def add_friendship(user_id, friend_id):
+    """Creates a friendship between two users."""
+    conn = get_db_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO friendships (user_id, friend_id) VALUES (%s, %s)",
+                    (user_id, friend_id)
+                )
+                cur.execute(
+                    "INSERT INTO friendships (user_id, friend_id) VALUES (%s, %s)",
+                    (friend_id, user_id)
+                )
+                conn.commit()
+                return True
+        except psycopg2.IntegrityError:
+            print("Friendship already exists.")
+            conn.rollback()
+        except psycopg2.Error as e:
+            print(f"Error adding friendship: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+    return False
+
+def get_friends(user_id):
+    """Fetches a user's friends."""
+    conn = get_db_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT u.user_id, u.name FROM users u JOIN friendships f ON u.user_id = f.friend_id WHERE f.user_id = %s",
+                    (user_id,)
+                )
+                return cur.fetchall()
+        except psycopg2.Error as e:
+            print(f"Error fetching friends: {e}")
+            return []
+        finally:
+            conn.close()
+    return []
+
+def get_leaderboard_data(user_id):
+    """
+    Generates leaderboard data for a user and their friends based on weekly workouts.
+    This function demonstrates aggregation for a social feature.
+    """
+    conn = get_db_connection()
+    if conn:
+        try:
+            friend_ids = [friend[0] for friend in get_friends(user_id)]
+            user_ids = [user_id] + friend_ids
+            
+            with conn.cursor() as cur:
+                today = date.today()
+                start_of_week = today - timedelta(days=today.weekday())
+                
+                query = """
+                    SELECT u.name, COUNT(w.workout_id) AS weekly_workouts
+                    FROM users u
+                    LEFT JOIN workouts w ON u.user_id = w.user_id
+                    AND w.workout_date >= %s
+                    WHERE u.user_id = ANY(%s)
+                    GROUP BY u.name
+                    ORDER BY weekly_workouts DESC;
+                """
+                cur.execute(query, (start_of_week, user_ids))
+                return cur.fetchall()
+        except psycopg2.Error as e:
+            print(f"Error generating leaderboard: {e}")
+            return []
+        finally:
+            conn.close()
+    return []# Fitness_tracker_24365
